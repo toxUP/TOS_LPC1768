@@ -1,0 +1,191 @@
+#!/bin/bash
+# -*- mode: shell-script; mode: flyspell-prog; -*-
+#
+# Copyright (c) 2010, Tadashi G Takaoka
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions
+# are met:
+#
+# - Redistributions of source code must retain the above copyright
+#   notice, this list of conditions and the following disclaimer.
+# - Redistributions in binary form must reproduce the above copyright
+#   notice, this list of conditions and the following disclaimer in
+#   the documentation and/or other materials provided with the
+#   distribution.
+# - Neither the name of Tadashi G. Takaoka nor the names of its
+#   contributors may be used to endorse or promote products derived
+#   from this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+# FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+# COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
+# INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+# HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
+# STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
+# OF THE POSSIBILITY OF SUCH DAMAGE.
+#
+
+function die() {
+    echo "$@" 1>&2
+    exit 1
+}
+
+function do_cmd() {
+    echo "#####" "$@" 1>&2
+    eval "$@"
+}
+
+function do_cd() {
+    echo "#####" cd "$@" 1>&2
+    cd "$@"
+}
+
+function do_patch() {
+    [[ $# -ge 2 ]] || die "usage: do_patch dir patch [...]"
+    local dir=$1 patch=$2
+    shift 2
+    [[ -f $patch ]] || return
+    do_cmd "patch -d $dir $@ < $patch" \
+        || die "patch $patch failed"
+}
+
+function is_osx() {
+    [[ $(uname) = Darwin ]]
+}
+
+function is_osx_snow_leopard() {
+    [[ $(uname) =~ ^10.8 ]]
+}
+
+function is_linux() {
+    [[ $(uname) = Linux ]]
+}
+
+function num_cpus() {
+    local n
+    if is_osx; then
+        n=$(sysctl -n hw.ncpu)
+    elif is_linux; then
+        n=$(grep ^processor /proc/cpuinfo | wc -l)
+    else
+        n=1
+    fi
+    echo $((n * 2))
+}
+
+function symlink() {
+    [[ $# -eq 2 ]] \
+        || die "usage: symlink src dst"
+    local src=$1 dst=$2
+    [[ -d $dst || -h $dst ]] \
+        && do_cmd rm -rf $dst
+    do_cmd ln -s $src $dst
+}
+
+function fetch() {
+    local url out
+    if [[ $# -eq 1 ]]; then
+        url=$1
+        out=$(basename $url)
+    elif [[ $# -eq 2 ]]; then
+        url=$1
+        out=$2
+    else
+        die "usage: fetch url [out_file]"
+    fi
+    [[ -f $out ]] \
+        && return
+    if is_linux; then
+        do_cmd wget -O $out $url \
+            || die "can not fetch $out from $url"
+    elif is_osx; then
+        do_cmd curl -R -o $out -L $url \
+            || die "can not fetch $out from $url"
+    else
+        die "unknown host architecture"
+    fi
+}
+
+function clone() {
+    local sudo=no
+    [[ $1 == "--sudo" ]] && { sudo=yes; shift; }
+    [[ $# -ge 3 ]] \
+        || die "usage: clone [--sudo] git|svn|cvs repo out_dir [...]"
+    local cmd=$1 repo=$2 out=$3
+    shift 3
+
+    local line
+    if [[ -d $out ]]; then
+        do_cd $out
+        case $cmd in
+        git) line+=(git pull);;
+        svn) line+=(svn up);;
+        cvs) line+=(cvs -q up);;
+        *)   die "unknown command $cmd";;
+        esac
+        [[ $sudo == yes ]] && line=(sudo "${line[@]}")
+        do_cmd "${line[@]}"
+        do_cd -
+    else
+        case $cmd in
+        git) line+=(git clone $repo $out "$@");;
+        svn) line+=(svn checkout $repo $out);;
+        cvs) line+=(cvs -z3 -d $repo checkout -P $out);;
+        *)   die "unknown command $cmd";;
+        esac
+        [[ $sudo == yes ]] && line=(sudo "${line[@]}")
+        do_cmd "${line[@]}"
+    fi
+}
+
+function copy() {
+    local sudo=no
+    [[ $1 == "--sudo" ]] && { sudo=yes; shift; }
+    [[ $# -eq 2 ]] || die "usage: copy [--sudo] from to_dir"
+
+    local from=$1 to=$2 rm=(rm) mkdir=(mkdir) tar=(tar) mv=(mv)
+    if [[ $sudo == yes ]]; then
+        rm=(sudo rm)
+        mkdir=(sudo mkdir)
+        tar=(sudo tar)
+        mv=(sudo mv)
+    fi
+
+    [[ -d $to ]] && do_cmd "${rm[@]} -rf $to"
+    if [[ -d $from ]]; then
+        do_cmd "${mkdir[@]} -p $to"
+        local exclude=(--exclude CVS --exclude .svn --exclude .git)
+        do_cmd "tar cf - -C $from . | ${tar[@]} xf - ${exclude[@]} -C $to"
+    elif [[ -f $from ]]; then
+        local out extract
+        case $from in
+        *.tar.gz)
+            out=$(basename $from .tar.gz)
+            extract=(tar xzf);;
+        *.tar.bz2)
+            out=$(basename $from .tar.bz2)
+            extract=(tar xjf);;
+        *)
+            die "unknown source format $from";;
+        esac
+        if [[ $out == $(basename $to) ]]; then
+            [[ $sudo == yes ]] && extract=(sudo "${extract[@]}")
+            do_cmd "${extract[@]} $from -C $(dirname $to)"
+        else
+            do_cmd "${extract[@]} $from"
+            do_cmd "${mv[@]} $out $to"
+        fi
+    fi
+}
+
+# Local Variables:
+# indent-tabs-mode: nil
+# End:
+# vim: set et ts=4 sw=4:

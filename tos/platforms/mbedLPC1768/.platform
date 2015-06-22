@@ -1,0 +1,27 @@
+# Includes that should take precedence come first.  Platforms come before
+# chips because they may override files.  These must be specified as
+# @includes instead of -I's to @opts, otherwise the %T won't be processed
+# by ncc.
+
+
+push ( @includes,
+  "%T/platforms/mbedLPC1768",
+  "%T/chips/cortex/m3/",
+  "%T/chips/cortex/m3/LPC17XX/",
+  "%T/chips/cortex/m3/LPC17XX/LPC1768/",
+  "%T/chips/cortex/m3/LPC17XX/pins",
+  "%T/chips/cortex/m3/LPC17XX/timer",
+  "%T/lib/timer",
+  "%T/lib/serial",
+  "%T/lib/power",
+);
+
+@opts = qw(
+
+  -gcc=arm-none-eabi-gcc
+  -mcpu=cortex-m3
+  -fnesc-target=env
+  -fnesc-no-debug
+  -fnesc-scheduler=TinySchedulerC,TinySchedulerC.TaskBasic,TaskBasic,TaskBasic,runTask,postTask
+
+);
